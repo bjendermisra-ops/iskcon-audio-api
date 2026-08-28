@@ -16,6 +16,8 @@ def get_audio():
         return jsonify({"error": "Video ID missing"}), 400
 
     url = f"https://www.youtube.com/watch?v={video_id}"
+    
+    # Bypasses Datacenter "Sign in to confirm you're not a bot"
     ydl_opts = {
         'format': 'bestaudio/best',
         'quiet': True,
@@ -23,7 +25,7 @@ def get_audio():
         'nocheckcertificate': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'ios', 'web']
+                'player_client': ['ios', 'android', 'mweb']
             }
         }
     }
@@ -32,10 +34,10 @@ def get_audio():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             
-            # 1. Direct URL check
+            # 1. Direct stream check
             audio_url = info.get('url')
             
-            # 2. Formats array fallback (Extract real .m4a / audio stream)
+            # 2. Formats array scan (Extracts real .m4a audio stream)
             if not audio_url and 'formats' in info:
                 audio_formats = [f for f in info['formats'] if f.get('acodec') != 'none']
                 if audio_formats:
@@ -44,7 +46,7 @@ def get_audio():
                     audio_url = info['formats'][0].get('url')
 
             if not audio_url:
-                return jsonify({"error": "Audio stream link not found"}), 404
+                return jsonify({"error": "Audio stream URL not found"}), 404
 
             return jsonify({
                 "id": video_id,
