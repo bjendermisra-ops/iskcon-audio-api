@@ -9,7 +9,6 @@ CORS(app)
 def home():
     return jsonify({"status": "ISKCON Real Audio API is Live & Running!"})
 
-# 1. Direct Audio URL Extractor Endpoint
 @app.route('/audio')
 def get_audio():
     video_id = request.args.get('id')
@@ -18,33 +17,46 @@ def get_audio():
 
     url = f"https://www.youtube.com/watch?v={video_id}"
     ydl_opts = {
-        'format': 'bestaudio[ext=m4a]/bestaudio/best',
+        'format': 'bestaudio/best',
         'quiet': True,
         'skip_download': True,
-        'nocheckcertificate': True
+        'nocheckcertificate': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios', 'web']
+            }
+        }
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
+            
+            # 1. Direct URL check
             audio_url = info.get('url')
-            title = info.get('title')
-            channel = info.get('uploader')
-            duration = info.get('duration')
-            thumb = info.get('thumbnail') or f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg"
+            
+            # 2. Formats array fallback (Extract real .m4a / audio stream)
+            if not audio_url and 'formats' in info:
+                audio_formats = [f for f in info['formats'] if f.get('acodec') != 'none']
+                if audio_formats:
+                    audio_url = audio_formats[-1].get('url')
+                elif len(info['formats']) > 0:
+                    audio_url = info['formats'][0].get('url')
+
+            if not audio_url:
+                return jsonify({"error": "Audio stream link not found"}), 404
 
             return jsonify({
                 "id": video_id,
-                "title": title,
-                "channel": channel,
-                "duration": duration,
-                "thumb": thumb,
+                "title": info.get('title'),
+                "channel": info.get('uploader') or info.get('channel') or "ISKCON",
+                "duration": info.get('duration'),
+                "thumb": info.get('thumbnail') or f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
                 "audioUrl": audio_url
             })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# 2. Search Endpoint
 @app.route('/search')
 def search():
     query = request.args.get('q', 'ISKCON Kirtan')
