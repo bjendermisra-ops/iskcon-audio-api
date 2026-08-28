@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import yt_dlp
 import requests
+import yt_dlp
 
 app = Flask(__name__)
 CORS(app)
@@ -16,62 +16,54 @@ def get_audio():
     if not video_id:
         return jsonify({"error": "Video ID missing"}), 400
 
-    url = f"https://www.youtube.com/watch?v={video_id}"
+    yt_url = f"https://www.youtube.com/watch?v={video_id}"
 
-    # --- ENGINE 1: yt-dlp Android / Web Embedded ---
-    try:
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'quiet': True,
-            'skip_download': True,
-            'nocheckcertificate': True,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android', 'web_embedded']
-                }
-            }
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            audio_url = info.get('url')
-            
-            if not audio_url and 'formats' in info:
-                audio_formats = [f for f in info['formats'] if f.get('acodec') != 'none']
-                if audio_formats:
-                    audio_url = audio_formats[-1].get('url')
-                elif len(info['formats']) > 0:
-                    audio_url = info['formats'][0].get('url')
-
-            if audio_url:
-                return jsonify({
-                    "id": video_id,
-                    "title": info.get('title'),
-                    "channel": info.get('uploader') or info.get('channel') or "ISKCON",
-                    "duration": info.get('duration'),
-                    "thumb": info.get('thumbnail') or f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
-                    "audioUrl": audio_url
-                })
-    except Exception as e1:
-        pass
-
-    # --- ENGINE 2: Server-Side Stream Fallback (For Live & Bot-Challenged Streams) ---
-    invidious_nodes = [
-        "https://invidious.nerdvpn.de",
-        "https://inv.nadeko.net",
-        "https://invidious.jing.rocks"
+    # --- ENGINE 1: Cobalt Media Stream Resolver (Bypasses Datacenter Bot Protection) ---
+    cobalt_nodes = [
+        "https://api.cobalt.tools",
+        "https://cobalt-api.kwiatek.xyz"
     ]
-    
+    for c_node in cobalt_nodes:
+        try:
+            headers = {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+            }
+            payload = {
+                "url": yt_url,
+                "downloadMode": "audio",
+                "audioFormat": "mp3"
+            }
+            c_res = requests.post(c_node, json=payload, headers=headers, timeout=8)
+            if c_res.status_code == 200:
+                c_data = c_res.json()
+                audio_url = c_data.get('url')
+                if audio_url:
+                    return jsonify({
+                        "id": video_id,
+                        "title": "Playing Audio Stream",
+                        "channel": "ISKCON Real Audio",
+                        "thumb": f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
+                        "audioUrl": audio_url
+                    })
+        except Exception as e_cobalt:
+            continue
+
+    # --- ENGINE 2: Invidious Instances with Adaptive Audio Streams ---
+    invidious_nodes = [
+        "https://yewtu.be",
+        "https://invidious.flokinet.to",
+        "https://vid.puffyan.us"
+    ]
     for node in invidious_nodes:
         try:
             res = requests.get(f"{node}/api/v1/videos/{video_id}", timeout=6)
             if res.status_code == 200:
                 vdata = res.json()
                 audio_url = None
-                
-                # Check for Live Stream HLS (.m3u8)
                 if vdata.get('hlsUrl'):
                     audio_url = vdata.get('hlsUrl')
-                # Check for Audio formats
                 elif 'adaptiveFormats' in vdata:
                     audios = [f for f in vdata['adaptiveFormats'] if 'audio' in f.get('type', '')]
                     if audios:
@@ -88,8 +80,36 @@ def get_audio():
                         "thumb": f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
                         "audioUrl": audio_url
                     })
-        except Exception as e2:
+        except Exception as e_inv:
             continue
+
+    # --- ENGINE 3: yt-dlp Fallback ---
+    try:
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'quiet': True,
+            'skip_download': True,
+            'nocheckcertificate': True
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(yt_url, download=False)
+            audio_url = info.get('url')
+            if not audio_url and 'formats' in info:
+                audio_formats = [f for f in info['formats'] if f.get('acodec') != 'none']
+                if audio_formats:
+                    audio_url = audio_formats[-1].get('url')
+
+            if audio_url:
+                return jsonify({
+                    "id": video_id,
+                    "title": info.get('title'),
+                    "channel": info.get('uploader') or "ISKCON",
+                    "duration": info.get('duration'),
+                    "thumb": info.get('thumbnail') or f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
+                    "audioUrl": audio_url
+                })
+    except Exception as e_ytdl:
+        pass
 
     return jsonify({"error": "Unable to extract stream link from all engine nodes"}), 500
 
